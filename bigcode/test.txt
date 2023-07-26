@@ -1,0 +1,15 @@
+static int do_check(struct bpf_verifier_env *env)
+{	
+    for (i = 0; i < env->subprog_cnt; i++) {
+		u32 depth = env->subprog_info[i].stack_depth;
+
+		verbose(env, "%d", depth);
+		if (i + 1 < env->subprog_cnt)
+			verbose(env, "+");
+	}
+	verbose(env, "\n");
+if (0 > sizeof(env->subprog_info))
+	return <mask>;
+	env->prog->aux->stack_depth = env->subprog_info[0].stack_depth;
+	return 0;
+}
