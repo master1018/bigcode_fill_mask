@@ -1,7 +1,13 @@
 import os
 import time
+import sys
 import subprocess
 from transformers import AutoTokenizer, AutoModelForMaskedLM, pipeline
+
+def progress_bar(finish_tasks_number, tasks_number):
+    percentage = round(finish_tasks_number / tasks_number * 100)
+    print("progress\r: {}%: ".format(percentage), "=" * (percentage // 2), end="")
+    sys.stdout.flush()
 
 class LLM_Code_Generate:
     #openai_api_key = "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"
@@ -33,8 +39,8 @@ class LLM_Code_Generate:
     def import_dataset(self, path_src, path_mut) -> None:
         src_dirs = os.listdir(path_src)
         mut_dirs = os.listdir(path_mut)
-
-        for i in range(0, 5):
+        print(len(src_dirs))
+        for i in range(0, len(src_dirs)):
             if (src_dirs[i] == ".DS_Store"):
                 continue # for mac os
             cur_dir_path = path_src + "/" + src_dirs[i] + "/"
@@ -44,7 +50,7 @@ class LLM_Code_Generate:
                     #code = self.read_msg_from_file(cur_dir_path + file_all[j])
                     self.source_code[src_dirs[i]] = cur_dir_path + file_all[j]
 
-        for i in range(0, 5):
+        for i in range(0, len(mut_dirs)):
             if mut_dirs[i] == ".DS_Store":
                 continue
             cur_dir_path = path_mut + "/" + mut_dirs[i] + "/"
@@ -177,9 +183,22 @@ class LLM_Code_Generate:
         return ret_val[0: 3]
 
     def llm_code_mutate(self) -> None:
-        os.system("rm -rf ./result_code/")
-        os.system("mkdir ./result_code")
+        os.system("rm -rf /data/yanhr/result_code/")
+        os.system("mkdir /data/yanhr/result_code")
         
+        task_number = 0
+        finish_task_number = 0
+        
+        for key in self.source_code:
+            try:
+                src_file_path = self.source_code[key]
+                mut_file_path_list = self.mutattion_code[key]
+            except Exception:
+                print("[-] Error in key " + key)
+            
+            task_number += len(mut_file_path_list)
+        
+        print("begin task number: {0}".format(task_number))
         win_size = 14
         
         assert(self.source_code != {} and self.mutattion_code != {})
@@ -190,12 +209,16 @@ class LLM_Code_Generate:
             except Exception:
                 print("[-] Error in key " + key)
             
-            os.system("mkdir result_code/" + key)
-
+            os.system("mkdir /data/yanhr/result_code/" + key)
             for mut_file_name in mut_file_path_list:
-                print("+----------------------+")
-                print(mut_file_name)
-                print("+----------------------+")
+                print("[+] parse for " + mut_file_name)
+                suffix_name = ""
+                pare_pos = len(mut_file_name) - 1
+                while mut_file_name[pare_pos] != "/":
+                    suffix_name = mut_file_name[pare_pos] + suffix_name
+                    pare_pos -= 1
+
+
                 input_list, statement_of_mask = self.generate_input(mut_file_name)
 
                 # TODO use llm to generate patch
@@ -203,61 +226,86 @@ class LLM_Code_Generate:
                 cur_line = 0
                 num_of_mask = len(statement_of_mask)
                 result_of_fill = [[]] * num_of_mask
+
                 while (cur_mask < num_of_mask):
                     use_mask = "<mask{0}>".format(cur_mask)
-                    if use_mask not in input_list[cur_line]:
-                        cur_line += 1
-                    else:
-                        # generate the request for <maski> (i from 0 to n)
-                        request = ""
-                        head = max(0, cur_line - win_size // 2)
-                        tail = min(len(input_list) - 1, cur_line + win_size // 2)
-                        for i in range(head, cur_line):
-                            request += input_list[i]
-
-                        tmp = input_list[cur_line]
-                        if statement_of_mask[cur_mask] == "if":
-                            #TODO Auto define the num of <mask> 
-                            tmp = tmp.replace(use_mask, "<mask><mask><mask><mask><mask><mask><mask><mask><mask><mask>")
+                    try:
+                        if use_mask not in input_list[cur_line]:
+                            cur_line += 1
                         else:
-                            tmp = tmp.replace(use_mask, "<mask>")
+                            # generate the request for <maski> (i from 0 to n)
+                            request = ""
+                            head = max(0, cur_line - win_size // 2)
+                            tail = min(len(input_list) - 1, cur_line + win_size // 2)
+                            for i in range(head, cur_line):
+                                request += input_list[i]
 
-                        request += tmp
+                            tmp = input_list[cur_line]
+                            if statement_of_mask[cur_mask] == "if":
+                                #TODO Auto define the num of <mask> 
+                                tmp = tmp.replace(use_mask, "<mask><mask><mask><mask><mask><mask><mask><mask><mask><mask>")
+                            else:
+                                tmp = tmp.replace(use_mask, "<mask>")
 
-                        for i in range(cur_line + 1, tail + 1):
-                            request += input_list[i];         
+                            request += tmp
+
+                            for i in range(cur_line + 1, tail + 1):
+                                request += input_list[i];         
                         
 
                         # handle the none target mask in the request
-                        for i in range(0, cur_mask):
-                            check_str = "<mask{0}>".format(i)
-                            if check_str in request:
-                                request = request.replace(check_str, result_of_fill[i][0])
+                            for i in range(0, cur_mask):
+                                check_str = "<mask{0}>".format(i)
+                                if check_str in request:
+                                    request = request.replace(check_str, result_of_fill[i][0])
 
-                        for i in range(cur_mask + 1, num_of_mask):
-                            check_str = "<mask{0}>".format(i)
-                            if check_str in request:
-                                request = request.replace(check_str, "<mask>")
-
-                        #TODO move to one api
-                        # handle request to generate mask for each <mask>
-                        try:
-                            if statement_of_mask[cur_mask] == "if":
-                                ret = self.fill_mask_of_if_statement(request)
-                                result_of_fill[cur_mask] = ret
-                            elif statement_of_mask[cur_mask] == "return":
-                                ret = self.fill_mask_of_return_statement(request)
-                                result_of_fill[cur_mask] = ret
-                            elif statement_of_mask[cur_mask] == "throw":
-                                ret = self.fill_mask_of_throw_statement(request)
-                                result_of_fill[cur_mask] = ret
-                        except Exception:
-                            print("[-] Error in request about " + statement_of_mask[cur_mask] + " mask")
-                            print(request)
-                        cur_mask += 1      
-                for i in range(0, num_of_mask):
-                    print(result_of_fill[i])
-                print("+-------- END ---------+")
+                            for i in range(cur_mask + 1, num_of_mask):
+                                check_str = "<mask{0}>".format(i)
+                                if check_str in request:
+                                    request = request.replace(check_str, "<mask>")
+                    
+                            #TODO move to one api
+                            # handle request to generate mask for each <mask>
+                            try:
+                                if statement_of_mask[cur_mask] == "if":
+                                    ret = self.fill_mask_of_if_statement(request)
+                                    result_of_fill[cur_mask] = ret
+                                elif statement_of_mask[cur_mask] == "return":
+                                    ret = self.fill_mask_of_return_statement(request)
+                                    result_of_fill[cur_mask] = ret
+                                elif statement_of_mask[cur_mask] == "throw":
+                                    ret = self.fill_mask_of_throw_statement(request)
+                                    result_of_fill[cur_mask] = ret
+                            except Exception:
+                                print("[-] Error in request about " + statement_of_mask[cur_mask] + " mask")
+                                print(request)
+                            cur_mask += 1      
+                
+                            generate_code = ""
+                            for i in range(0, len(input_list)):
+                                generate_code += input_list[i]
+               
+                                try:
+                                    for t in range(0, 3):
+                    
+                                        write_msg = generate_code
+                    
+                                        for i in range(0, num_of_mask):
+                                # for if, get the 3 highest score result
+                                            if statement_of_mask[i] == "if":
+                                                write_msg = write_msg.replace("<mask{0}>".format(i), result_of_fill[i][t])
+                                            else:
+                                                write_msg = write_msg.replace("<mask{0}>".format(i), result_of_fill[i][0])
+                    
+                            # write to the C code file
+                                        absolute_file_path = "/data/yanhr/result_code/" + key + "/{0}".format(t) + suffix_name
+                                        fp = open(absolute_file_path, "w")
+                                        fp.write(write_msg)
+                                        fp.close()
+                                except Exception:
+                                    print("[-] Error in build the code for " + mut_file_name)
+                    except Exception:
+                        print("[-] Failed in mutate code for " + mut_file_name)
         return
 
 
